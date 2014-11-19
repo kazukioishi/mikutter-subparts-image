@@ -3,6 +3,10 @@ miquire :mui, 'sub_parts_helper'
 
 require 'gtk2'
 require 'cairo'
+require 'uri'
+require 'base58'
+require 'net/http'
+require 'rexml/document'
 
 
 # 画像ローダー
@@ -73,7 +77,7 @@ class ImageLoadHelper
     loader = Gdk::PixbufLoader.new
     loader.write(raw)
     loader.close
- 
+
     loader.pixbuf
   rescue => e
     puts e
@@ -207,8 +211,36 @@ Plugin.create :sub_parts_image do
         nil
       end
     }
+
+    #Flickr thumbnail
+    Plugin[:openimg].addsupport(/www\.flickr\.com\/photos\//, nil) { |url, cancel|
+      photo = url.match(/\/photos\/[\w\-_@]+\/(\w+)/)[1]
+      FlickrAPI(photo)
+    }
+
+    Plugin[:openimg].addsupport(/flic\.kr\//, nil) { |url, cancel|
+      enc = url.match(/\/p\/(\w+)/)[1]
+      photo = Base58.decode(enc)
+      FlickrAPI(photo)
+    }
+
   end
 
+  def FlickrAPI(photo)
+    ses = Net::HTTP.new('www.flickr.com',443)
+    ses.use_ssl = true
+    ses.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    ses.start{ |session|
+      apikey = '9874567293c02ee697ce3c607d29ef82'
+      path = "/services/rest/?method=flickr.photos.getInfo&api_key=#{apikey}&photo_id=#{photo}&format=rest"
+      response = session.get(path)
+      return nil if (response == nil || response.code.to_i != 200)
+      doc = REXML::Document.new(response.body)
+      return nil if (doc.root.attributes['stat'] != 'ok')
+      attr = doc.root.elements['photo'].attributes
+      return "http://farm#{attr['farm']}.static.flickr.com/#{attr['server']}/#{attr['id']}_#{attr['secret']}_m.jpg"
+    }
+  end
 
   # サブパーツ
   class Gdk::SubPartsImage < Gdk::SubParts
@@ -223,7 +255,7 @@ Plugin.create :sub_parts_image do
           # サブパーツ描画
           helper.on_modify
           helper.signal_handler_disconnect(sid)
-          false 
+          false
         }
       end
 
@@ -296,10 +328,10 @@ Plugin.create :sub_parts_image do
           parts_height = UserConfig[:subparts_image_height]
 
           context.save {
-            width_ratio = context.clip_extents[2] / icon.width 
+            width_ratio = context.clip_extents[2] / icon.width
             height_ratio = parts_height.to_f / icon.height
             scale_xy = [height_ratio, width_ratio].min
- 
+
             context.translate((context.clip_extents[2] - icon.width * scale_xy) / 2, parts_height * i)
             context.scale(scale_xy, scale_xy)
             context.set_source_pixbuf(icon)
